@@ -1,4 +1,5 @@
 import pandas as pd
+from tqdm import tqdm
 from _classes.PriceTradeAnalyzer import TradingModel, PlotHelper, PriceSnapshot
 from _classes.Utility import *
 
@@ -22,15 +23,21 @@ def RunModel(modelName:str, modelFunction, ticker:str, startDate:str, durationIn
 	#Performs the logic of the given model over a period of time to evaluate the performance
 	modelName = modelName + '_' + ticker
 	print('Running model ' + modelName)
-	tm = TradingModel(modelName=modelName, startingTicker=ticker, startDate=startDate, durationInYears=durationInYears, totalFunds=portfolioSize, tranchSize=round(portfolioSize/10), verbose=verbose)
+	tm = TradingModel(modelName=modelName, startingTicker=ticker, startDate=startDate, durationInYears=durationInYears, totalFunds=portfolioSize, trancheSize=round(portfolioSize/10), verbose=verbose)
 	startDate = tm.modelStartDate
 	endDate = tm.modelEndDate
+	dayCounter = 0
+	currentYear = 0
+	days_passed = 0
+	total_days = (endDate - startDate).days    
 	if not tm.modelReady:
 		print('Unable to initialize price history for model for ' + str(startDate))
 		if returndailyValues: return pd.DataFrame()
 		else:return portfolioSize
 	else:
+		pbar = tqdm(total=total_days, desc=f"Running {modelName}", unit="day")
 		while not tm.ModelCompleted():
+			pbar.update(days_passed)
 			modelFunction(tm, ticker)
 			tm.ProcessDay()
 			if tm.AccountingError(): 
@@ -38,12 +45,13 @@ def RunModel(modelName:str, modelFunction, ticker:str, startDate:str, durationIn
 				tm.PositionSummary()
 				#tm.PrintPositions()
 				break
+			days_passed+=1
+		pbar.close()
 		cash, asset = tm.Value()
 		#print('Ending Value: ', cash + asset, '(Cash', cash, ', Asset', asset, ')')
 		tradeCount = len(tm.tradeHistory)
 		ticker = tm.priceHistory[0].ticker
 		RecordPerformance(ModelName=modelName, StartDate=startDate, EndDate=tm.currentDate, StartValue=portfolioSize, EndValue=(cash + asset), TradeCount=tradeCount, Ticker=ticker)
-
 		if returndailyValues:
 			tm.CloseModel(verbose, saveHistoryToFile)
 			return tm.GetDailyValue()   							#return daily value for model comparisons
@@ -61,11 +69,11 @@ def PlotModeldailyValue(modelName:str, modelFunction, ticker:str, startDate:str,
 def RunTradingModelBuyHold(tm: TradingModel, ticker:str):
 #Baseline model, buy and hold
 	sn = tm.GetPriceSnapshot()
-	if tm.verbose: print(sn.date, sn.Target_1Day)
+	if tm.verbose: print(sn.Date, sn.Target)
 	if not sn == None:
-		for i in range(tm._tranchCount):
+		for i in range(tm._trancheCount):
 			available, buyPending, sellPending, longPositions = tm.PositionSummary()				
-			if tm.TranchesAvailable() > 0 and tm.FundsAvailable() > sn.high: tm.PlaceBuy(ticker=ticker, price=sn.low, marketOrder=True)
+			if tm.TranchesAvailable() > 0 and tm.FundsAvailable() > sn.High: tm.PlaceBuy(ticker=ticker, price=sn.Low, marketOrder=True)
 			if available ==0: break
 
 def RunTradingModelSeasonal(tm: TradingModel, ticker:str):
@@ -74,16 +82,16 @@ def RunTradingModelSeasonal(tm: TradingModel, ticker:str):
 	if not sn == None:
 		BuyDate  = ToDateTime('03/01/' + str(tm.currentDate.year))
 		SellDate = ToDateTime('10/01/' + str(tm.currentDate.year))
-		for i in range(tm._tranchCount):
+		for i in range(tm._trancheCount):
 			available, buyPending, sellPending, longPositions = tm.PositionSummary()				
 			if not((tm.currentDate >= SellDate) or (tm.currentDate <= BuyDate)):
 				if longPositions > 0: 
-					tm.PlaceSell(ticker=ticker, price=sn.high, marketOrder=True)
+					tm.PlaceSell(ticker=ticker, price=sn.High, marketOrder=True)
 				else:
 					break
 			else:
-				if available > 0 and tm.FundsAvailable() > sn.high: 
-					tm.PlaceBuy(ticker=ticker, price=sn.low, marketOrder=True)
+				if available > 0 and tm.FundsAvailable() > sn.High: 
+					tm.PlaceBuy(ticker=ticker, price=sn.Low, marketOrder=True)
 				else:
 					break
 
